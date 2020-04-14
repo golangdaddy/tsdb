@@ -1,0 +1,62 @@
+package metrick
+
+import (
+	"fmt"
+	"time"
+	"testing"
+	"io/ioutil"
+)
+
+func TestBackups(t *testing.T) {
+
+	tree := NewTree(
+		TreeSettings{
+			VolumePath: CONST_TESTVOLUME,
+		},
+	)
+	defer cleanupFiles()
+	defer tree.Stop(t)
+
+	config := tree.MetricConfig("http_status_200")
+
+	total := int64(500)
+
+	dir := tree.settings.VolumePath + "/backups"
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
+	var metricsLoaded int
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+		filename := fmt.Sprintf("%s/%s", dir, file.Name())
+		n := tree.LoadBackupFile(filename, false)
+		if n > 0 {
+			metricsLoaded += n
+		}
+	}
+	fmt.Println("LOADED METRICS:", metricsLoaded)
+
+	now := time.Time{}
+
+	for x := 0; int64(x) < total; x++ {
+		now = now.Add(time.Second)
+		tree.AddMetric(
+			TestMetric(now, config, 1, tree.Label("labelone"), tree.Label("labeltwo")),
+		)
+	}
+
+	// dump files to disk
+	err, q := tree.BackupToDisk(now)
+	if err != nil {
+		panic(err)
+	}
+
+	if q.added != total {
+		t.Errorf("HAD RECORDS: %v/%v", q.added, total)
+	}
+
+}

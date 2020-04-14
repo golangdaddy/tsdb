@@ -1,0 +1,146 @@
+package metrick
+
+import (
+	"os"
+	"fmt"
+	"time"
+	"testing"
+	"io/ioutil"
+)
+
+const (
+	CONST_TESTVOLUME = "testing-mount"
+)
+
+func cleanupFiles() {
+
+	fmt.Println("CLEAN UP FILES")
+
+	files, err := ioutil.ReadDir(CONST_TESTVOLUME)
+	if err != nil {
+		panic(err)
+	}
+
+	for _, file := range files {
+
+		if file.IsDir() {
+			continue
+		}
+
+		err := os.Remove(CONST_TESTVOLUME + "/" + file.Name())
+		if err != nil {
+			panic(err)
+		}
+
+	}
+
+	files, err = ioutil.ReadDir(CONST_TESTVOLUME + "/backups")
+	if err != nil {
+		panic(err)
+	}
+
+	for _, file := range files {
+
+		if file.IsDir() {
+			continue
+		}
+
+		err := os.Remove(CONST_TESTVOLUME + "/backups/" + file.Name())
+		if err != nil {
+			panic(err)
+		}
+
+	}
+
+}
+
+func TestMount(t *testing.T) {
+
+	cleanupFiles()
+
+	tree := NewTree(
+		TreeSettings{
+			VolumePath: CONST_TESTVOLUME,
+		},
+	)
+	defer tree.Stop(t)
+
+	// test records to add
+	n := 1000
+	startTime := time.Now()
+
+	client, err := NewClient(
+		ClientSettings{
+			VolumePath: CONST_TESTVOLUME,
+		},
+	)
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
+
+	config := tree.MetricConfig("http_status_200")
+
+	for x := 0; x < n; x++ {
+		//fmt.Println("PUBLISHING")
+		client.Publish(
+			TestMetric(startTime, config, 1, tree.Label("labelone"), tree.Label("labeltwo")),
+		)
+	}
+
+	// wait before querying
+	time.Sleep(7 * time.Second)
+
+	year, month, _, _, hour, _, _, _, second := tree.When(startTime)
+
+	labels := []*Label{
+		tree.Label("labelone"),
+	}
+
+	query := NewQuery()
+	query.Metrics = []*MetricConfig{
+		config,
+	}
+	query.Labels = labels
+	query.Do(year)
+	if int(query.Results[config.Name].Total) != n {
+		fmt.Println("year TOTAL", query.Results[config.Name].Total)
+		t.Fail()
+	}
+
+	query = NewQuery()
+	query.Metrics = []*MetricConfig{
+		config,
+	}
+	query.Labels = labels
+	query.Do(month)
+	if int(query.Results[config.Name].Total) != n {
+		fmt.Println("month TOTAL", query.Results[config.Name].Total)
+		t.Fail()
+	}
+
+	query = NewQuery()
+	query.Metrics = []*MetricConfig{
+		config,
+	}
+	query.Labels = labels
+	query.Do(hour)
+	if int(query.Results[config.Name].Total) != n {
+		fmt.Println("hour TOTAL", query.Results[config.Name].Total)
+		t.Fail()
+	}
+
+	query = NewQuery()
+	query.Metrics = []*MetricConfig{
+		config,
+	}
+	query.Labels = labels
+	query.Do(second)
+	if int(query.Results[config.Name].Total) != n {
+		fmt.Println("second TOTAL", query.Results[config.Name].Total)
+		t.Fail()
+	}
+
+	fmt.Println("FINAL", tree.Inspect(), tree.stats)
+
+}

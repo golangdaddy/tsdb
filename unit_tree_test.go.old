@@ -1,0 +1,241 @@
+package metrick
+
+import (
+	"fmt"
+	"time"
+	"testing"
+	"strconv"
+)
+
+const (
+	CONST_SECONDS = 2
+)
+
+func TestEpoch(t *testing.T) {
+
+	tree := NewTree(
+		TreeSettings{},
+	)
+
+	theTime := time.Time{}
+
+	for x := 0; x < 59; x++ {
+
+		year, month, day, qday, hour, qhour, minute, qminute, second := tree.When(theTime)
+
+		//t.Log(theTime)
+
+		if year.Index != 1 {
+			t.Errorf("INVALID year INDEX: %v", year.Index)
+			t.Fail()
+		}
+		if month.Index != 0 {
+			t.Errorf("INVALID month INDEX: %v", month.Index)
+			t.Fail()
+		}
+		if day.Index != 0 {
+			t.Errorf("INVALID day INDEX: %v", day.Index)
+			t.Fail()
+		}
+		if qday.Index != 0 {
+			t.Errorf("INVALID qday INDEX: %v", qday.Index)
+			t.Fail()
+		}
+		if hour.Index != 0 {
+			t.Errorf("INVALID hour INDEX: %v", hour.Index)
+			t.Fail()
+		}
+		if qhour.Index != 0 {
+			t.Errorf("INVALID qhour INDEX: %v", qhour.Index)
+			t.Fail()
+		}
+		if minute.Index != 0 {
+			t.Errorf("INVALID minute INDEX: %v", minute.Index)
+			t.Fail()
+		}
+		if qminute.Index != computeSegment(second.Index, CONST_MEMBERS_MINUTE, CONST_SECTIONS_QMINUTE) {
+			t.Errorf("INVALID qminute INDEX: %v, EXPECTING: %v", qminute.Index, computeSegment(second.Index, CONST_MEMBERS_MINUTE, CONST_SECTIONS_QMINUTE))
+			t.Fail()
+		}
+		if second.Index != x {
+			t.Errorf("INVALID second INDEX: %v EXPECTING: %v", second.Index, x)
+			t.Fail()
+		}
+
+		theTime = theTime.Add(time.Second)
+
+	}
+
+}
+
+func TestSecDifferential(t *testing.T) {
+
+	tree := NewTree(
+		TreeSettings{},
+	)
+
+	for x := 0; x < 20; x++{
+
+		_, _, _, _, _, _, _, _, sec1 := tree.When(
+			time.Time{},
+		)
+
+		_, _, _, _, _, _, _, _, sec2 := tree.When(
+			(time.Time{}).Add(time.Second),
+		)
+
+		if sec2.Index != (sec1.Index + 1) {
+			t.Errorf("%v: INVALID DIFFERENTIAL %v %v", x, sec1.Index, sec2.Index)
+			t.Fail()
+		} else {
+			//t.Logf("%v: VALID DIFFERENTIAL %v %v", x, sec1.Index, sec2.Index)
+		}
+
+	}
+
+}
+
+func TestTheBloomFilter(t *testing.T) {
+
+	tree := NewTree(
+		TreeSettings{},
+	)
+	client, err := NewClient(
+		ClientSettings{},
+	)
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
+
+	config := tree.MetricConfig("http_status_200")
+
+	one := tree.Label("one")
+	two := tree.Label("two")
+
+	metric := client.NewMetric(
+		config,
+		1,
+		tree.Label("one"),
+		tree.Label("two"),
+	)
+
+	var node Node
+
+	_, _, _, _, _, _, _, _, node = tree.When(time.Now())
+
+	for x := 0; x < 9; x++ {
+
+		metric.applyToBloomFilter(node)
+		if !node.Contains(config) {
+			t.Error("NOT FOUND IN BLOOM FILTER")
+		}
+		if !node.Contains(one) {
+			t.Error("one  NOT FOUND IN BLOOM FILTER")
+		}
+		if !node.Contains(two) {
+			t.Error("two  NOT FOUND IN BLOOM FILTER")
+		}
+		node = node.Parent()
+
+	}
+
+
+}
+
+func TestTree1(t *testing.T) {
+
+	tree := NewTree(
+		TreeSettings{},
+	)
+	client, err := NewClient(
+		ClientSettings{},
+	)
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
+
+	configs := struct{
+		http_status_200 *MetricConfig
+		http_status_400 *MetricConfig
+	}{
+		tree.MetricConfig("http_status_200"),
+		tree.MetricConfig("http_status_400"),
+	}
+
+	secs := [CONST_SECONDS]*Second{}
+	var x int
+	for range time.NewTicker(time.Second).C {
+
+		for _, metric := range []*Metric{
+			client.NewMetric(configs.http_status_200, 1, tree.Label("powerlinks"), tree.Label("USA")),
+			client.NewMetric(configs.http_status_200, 1, tree.Label("powerlinks"), tree.Label("GBR")),
+			client.NewMetric(configs.http_status_200, 1, tree.Label("powerlinks"), tree.Label("USA")),
+			client.NewMetric(configs.http_status_200, 1, tree.Label("powerlinks"), tree.Label("GBR")),
+		} {
+			secs[x] = tree.AddMetric(metric)
+		}
+		x++
+		if x == CONST_SECONDS {
+			break
+		}
+	}
+	_, _, day, _, _, _, _, _, _:= tree.When(time.Now())
+
+
+	for x := 0; x < CONST_SECONDS; x ++ {
+
+		query := NewQuery()
+		query.Metrics = []*MetricConfig{
+			configs.http_status_200,
+		}
+		query.Labels = []*Label{
+			tree.Label("powerlinks"),
+			tree.Label("USA"),
+		}
+
+		query.Do(secs[x])
+
+		n := query.Results["http_status_200"].Total
+		if n != 2 {
+			t.Error("EXPECTED 2, INVALID RESULT: "+strconv.Itoa(int(n)))
+		}
+
+	}
+
+	query := NewQuery()
+	query.Metrics = []*MetricConfig{
+		configs.http_status_200,
+	}
+	query.Labels = []*Label{
+		tree.Label("powerlinks"),
+		tree.Label("USA"),
+	}
+
+	query.Do(day)
+	fmt.Println(query.Results)
+
+	n := query.Results["http_status_200"].Total
+	if n != 4 {
+		t.Error("EXPECTED 4, INVALID RESULT: "+strconv.Itoa(int(n)))
+	}
+	n = query.Results["http_status_200"].Count
+	if n != 4 {
+		t.Error("EXPECTED 4, INVALID RESULT: "+strconv.Itoa(int(n)))
+	}
+
+	// redo query to get double results
+
+	query.Do(day)
+	fmt.Println(query.Results)
+
+	n = query.Results["http_status_200"].Total
+	if n != 8 {
+		t.Error("EXPECTED 4, INVALID RESULT: "+strconv.Itoa(int(n)))
+	}
+	n = query.Results["http_status_200"].Count
+	if n != 8 {
+		t.Error("EXPECTED 4, INVALID RESULT: "+strconv.Itoa(int(n)))
+	}
+}

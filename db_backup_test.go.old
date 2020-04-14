@@ -1,0 +1,114 @@
+package metrick
+
+import (
+	"os"
+	"fmt"
+	"time"
+	"testing"
+	"encoding/gob"
+)
+
+const (
+	CONST_ADDED_METRICS = 500
+	CONST_METRICNAME_0 = "metricname0"
+	CONST_METRICNAME_1 = "metricname1"
+)
+
+var filename string = "db_backup_test.bak"
+
+func TestBackupFrequency(t *testing.T) {
+
+	now := (time.Time{}).UTC()
+	var count int
+
+	for x := 0; x < 3600; x++ {
+		now = now.Add(time.Second)
+		if OnInterval(now) {
+			count++
+		}
+	}
+
+	if count != 4 {
+		t.Fail()
+	}
+}
+
+func TestRecursiveFileWrite(t *testing.T) {
+
+	os.Mkdir(
+		fmt.Sprintf("%s/backups", "testing-mount"),
+		0666,
+	)
+
+	file, err := os.Create(filename)
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
+	enc := gob.NewEncoder(file)
+	startTime := time.Now()
+	for x := 0; x < CONST_ADDED_METRICS; x++ {
+		time.Sleep(time.Second / 20)
+		if err := writetofile(startTime, enc); err != nil {
+			t.Error(err)
+			t.Fail()
+		}
+	}
+	file.Close()
+
+	// test reading
+
+	tree := NewTree(
+		TreeSettings{
+			VolumePath: "testing-mount",
+		},
+	)
+	defer tree.Stop(t)
+
+	n := tree.LoadBackupFile(filename, true)
+
+	if n != CONST_ADDED_METRICS * 2 {
+		t.Errorf("FAILED TO LOAD CONST_ADDED_METRICS RECORDS, LOADED %d RECORDS", n)
+		t.Fail()
+	}
+
+	err, q := tree.BackupToDisk(startTime)
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
+
+	if q.added != CONST_ADDED_METRICS * 2 {
+		t.Errorf("INVALID TOTAL ADDED %d", q.added)
+		t.Fail()
+	}
+}
+
+func writetofile(t time.Time, enc *gob.Encoder) error {
+
+	metric := TestMetric(
+		t,
+		&MetricConfig{Name:CONST_METRICNAME_0},
+		1,
+		&Label{Label:"label1"},
+		&Label{Label:"label2"},
+	)
+
+	if err := metric.Serialise(enc); err != nil {
+		return err
+	}
+
+	metric = TestMetric(
+		t,
+		&MetricConfig{Name:CONST_METRICNAME_1},
+		1,
+		&Label{Label:"label1"},
+		&Label{Label:"label2"},
+	)
+
+	if err := metric.Serialise(enc); err != nil {
+		return err
+	}
+
+	return nil
+}

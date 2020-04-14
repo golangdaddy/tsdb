@@ -1,0 +1,104 @@
+package metrick
+
+import (
+	"fmt"
+	"time"
+	"testing"
+)
+
+func TestCleanUp(t *testing.T) {
+
+	tree := NewTree(
+		TreeSettings{
+			VolumePath: "testing-mount",
+			BufferDuration: 15 * time.Minute,
+		},
+	)
+	defer tree.Stop(t)
+
+	startTime := time.Time{}
+	now := time.Time{}
+
+	fmt.Println(now)
+
+	labels := []*Label{
+		&Label{Label:"label1"},
+		&Label{Label:"label2"},
+	}
+
+	config := &MetricConfig{Name:"CONST_METRICNAME_0"}
+
+
+	n := 1000
+
+	// put n metrics into q0-3
+
+	for z := 0; z < 96; z++ {
+
+		for x := 0; x < n; x++ {
+			metric := TestMetric(
+				startTime,
+				config,
+				1,
+				labels...,
+			)
+
+			tree.AddMetric(
+				metric,
+			)
+		}
+
+		_, _, day, _, _, _, _, _, _ := tree.When(startTime)
+
+		query := NewQuery()
+		query.Metrics = []*MetricConfig{
+			config,
+		}
+		query.Labels = labels
+		query.Do(day)
+		if z > 0 && int(query.Results[config.Name].Total) != 2 * n {
+			t.Errorf("%v INVALID TOTAL %v", z, query.Results[config.Name].Total)
+			t.Fail()
+			return
+		}
+
+		fmt.Println(query.Results[config.Name].Total, "METRICS IN DAY", z, startTime)
+
+		if OnInterval(startTime) {
+			backupTime := startTime.Add(CONST_BACKUP_OFFSET)
+			err, q := tree.BackupToDisk(backupTime)
+			if err != nil {
+				t.Error(err)
+				t.Fail()
+				return
+			}
+			if z > 0 && q.added != int64(n) {
+				t.Errorf("EXPECTING %d GOT %d", n, q.added)
+				t.Fail()
+				return
+			}
+			tree.CleanQHourFromMemory(backupTime)
+		}
+
+		_, _, _, _, _, qhour, _, _, _ := tree.When(startTime)
+
+		query = NewQuery()
+		query.Metrics = []*MetricConfig{
+			config,
+		}
+		query.Labels = labels
+		query.Do(qhour)
+		if int(query.Results[config.Name].Total) != n {
+			t.Errorf("%v INVALID qhour TOTAL %v", z, query.Results[config.Name].Total)
+			t.Fail()
+			return
+		}
+
+		fmt.Println(query.Results[config.Name].Total, "METRICS IN Q", qhour.Index, z, startTime)
+
+		// move forward 15 mins
+		startTime = startTime.Add(15 * time.Minute)
+
+	}
+
+}

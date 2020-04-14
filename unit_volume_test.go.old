@@ -1,0 +1,168 @@
+package metrick
+
+import (
+	"fmt"
+	"time"
+	"testing"
+)
+
+const (
+	CONST_testSeconds = 86400 * 2
+)
+
+func TestVolume(t *testing.T) {
+
+	tree := NewTree(
+		TreeSettings{},
+	)
+
+	configs := struct{
+		http_status_200 *MetricConfig
+		http_status_400 *MetricConfig
+	}{
+		tree.Config("http_status_200"),
+		tree.Config("http_status_400"),
+	}
+
+	r := time.Time{}
+	theTime := r
+
+	secs := [CONST_testSeconds]*Second{}
+	for x := 0; x < CONST_testSeconds; x++ {
+
+		for _, metric := range []*Metric{
+			TestMetric(theTime, configs.http_status_200, 1, tree.Label("smartryads"), tree.Label("GBP")),
+			TestMetric(theTime, configs.http_status_200, 1, tree.Label("powerlinks"), tree.Label("GBP")),
+			TestMetric(theTime, configs.http_status_200, 1, tree.Label("powerlinks"), tree.Label("USA")),
+			TestMetric(theTime, configs.http_status_200, 1, tree.Label("powerlinks"), tree.Label("RUS")),
+		} {
+			secs[x] = tree.AddMetric(metric)
+		}
+
+		theTime = theTime.Add(time.Second)
+	}
+
+	query := NewQuery()
+	query.Metrics = []*MetricConfig{
+		configs.http_status_200,
+		configs.http_status_400,
+	}
+	query.Labels = []*Label{
+		tree.Label("powerlinks"),
+		tree.Label("USA"),
+	}
+
+	year, _, _, _, _, _, _, _, _ := tree.When(r)
+
+	query.Reset()
+	query.Do(year)
+	fmt.Println("http_status_200", query.Results["http_status_200"].Total)
+
+	if query.Results["http_status_200"].Total != 172800 {
+		t.Errorf("INVALID RESULT: %v, EXPECTING: %v", query.Results["http_status_200"].Total, 86400)
+		t.Fail()
+	}
+
+	_, month, _, _, _, _, _, _, _ := tree.When(r)
+
+	query.Reset()
+	query.Do(month)
+	fmt.Println("http_status_200", query.Results["http_status_200"].Total)
+
+	if query.Results["http_status_200"].Total != 172800 {
+		t.Errorf("INVALID RESULT: %v, EXPECTING: %v", query.Results["http_status_200"].Total, 86400)
+		t.Fail()
+	}
+
+	_, _, day, _, _, _, _, _, _ := tree.When(r)
+
+	query.Reset()
+	query.Do(day)
+	fmt.Println("http_status_200", query.Results["http_status_200"].Total)
+
+	if query.Results["http_status_200"].Total != 86400 {
+		t.Errorf("INVALID RESULT: %v, EXPECTING: %v", query.Results["http_status_200"].Total, 86400)
+		t.Fail()
+	}
+
+	_, _, _, qday, _, _, _, _, _ := tree.When(r)
+
+	query.Reset()
+	query.Do(qday)
+	fmt.Println("http_status_200", query.Results["http_status_200"].Total)
+
+	if query.Results["http_status_200"].Total != 86400 / 4 {
+		t.Errorf("INVALID qday RESULT: %v, EXPECTING: %v", query.Results["http_status_200"].Total, 86400 / 4)
+		t.Fail()
+	}
+
+	_, _, _, _, hour, _, _, _, _ := tree.When(r)
+
+	query.Reset()
+	query.Do(hour)
+	fmt.Println("http_status_200", query.Results["http_status_200"].Total)
+
+	if query.Results["http_status_200"].Total != 3600 {
+		t.Errorf("INVALID hour RESULT: %v, EXPECTING: %v", query.Results["http_status_200"].Total, 3600)
+		t.Fail()
+	}
+
+	_, _, _, _, _, qhour, _, _, _ := tree.When(r)
+
+	query.Reset()
+	query.Do(qhour)
+	fmt.Println("http_status_200", query.Results["http_status_200"].Total)
+
+	if query.Results["http_status_200"].Total != 900 {
+		t.Errorf("INVALID qhour RESULT: %v, EXPECTING: %v", query.Results["http_status_200"].Total, 900)
+		t.Fail()
+	}
+
+	_, _, _, _, _, _, minute, _, _ := tree.When(r)
+
+	query.Reset()
+	query.Do(minute)
+	fmt.Println("http_status_200", query.Results["http_status_200"].Total)
+
+	if query.Results["http_status_200"].Total != 60 {
+		t.Errorf("INVALID minute RESULT: %v, EXPECTING: %v", query.Results["http_status_200"].Total, 60)
+		t.Fail()
+	}
+
+	_, _, _, _, _, _, _, qminute, _ := tree.When(r)
+
+	query.Reset()
+	query.Do(qminute)
+	fmt.Println("http_status_200", query.Results["http_status_200"].Total)
+
+	if query.Results["http_status_200"].Total != 15 {
+		t.Errorf("INVALID qminute RESULT: %v, EXPECTING: %v", query.Results["http_status_200"].Total, 15)
+		t.Fail()
+	}
+
+	_, _, _, _, _, _, _, _, second := tree.When(r)
+
+	query.Reset()
+	query.Do(second)
+	fmt.Println("http_status_200", query.Results["http_status_200"].Total)
+
+	if query.Results["http_status_200"].Total != 1 {
+		t.Errorf("INVALID second RESULT: %v, EXPECTING: %v", query.Results["http_status_200"].Total, 15)
+		t.Fail()
+	}
+
+	r = r.Add(time.Second)
+	_, _, _, _, _, _, _, _, second = tree.When(r)
+
+	query.Reset()
+	query.Do(second)
+	fmt.Println("http_status_200", query.Results["http_status_200"].Total)
+
+	if query.Results["http_status_200"].Total != 1 {
+		t.Errorf("INVALID second RESULT: %v, EXPECTING: %v", query.Results["http_status_200"].Total, 15)
+		t.Fail()
+	}
+
+	fmt.Println(tree.Inspect())
+
+}
